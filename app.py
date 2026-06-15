@@ -15,7 +15,7 @@ from PIL import Image
 import cv2
 import numpy as np
 
-from llm_stego import embed, extract, has_stego, embed_multiframe, extract_multiframe, has_multiframe_stego, get_frame_info
+from llm_stego import embed, extract, has_stego, embed_multiframe, extract_multiframe, has_multiframe_stego, get_frame_info, SELF_REVEAL_TRIGGER
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
@@ -112,6 +112,7 @@ def encode():
     hidden_msg = request.form.get('message', '')
     width = int(request.form.get('width', 80))
     detailed = request.form.get('detailed', 'false').lower() == 'true'
+    self_reveal = request.form.get('selfReveal', 'true').lower() == 'true'
     
     if not file.filename:
         return jsonify({'error': 'No file selected'}), 400
@@ -135,7 +136,7 @@ def encode():
                 return jsonify({'error': 'Could not extract frames from video'}), 400
             
             # Embed stego across ALL frames for long messages
-            frames = embed_multiframe(frames, hidden_msg)
+            frames = embed_multiframe(frames, hidden_msg, self_reveal=self_reveal)
             
             ascii_output = frames_to_document(frames)
             filename = 'stego_video.txt'
@@ -144,7 +145,7 @@ def encode():
             # Image
             img = Image.open(file.stream)
             ascii_art = image_to_ascii(img, width=width, detailed=detailed)
-            ascii_output = embed(ascii_art, hidden_msg)
+            ascii_output = embed(ascii_art, hidden_msg, self_reveal=self_reveal)
             filename = 'stego_image.txt'
         
         # Return as downloadable file
@@ -173,6 +174,7 @@ def preview():
     hidden_msg = request.form.get('message', '')
     width = int(request.form.get('width', 80))
     detailed = request.form.get('detailed', 'false').lower() == 'true'
+    self_reveal = request.form.get('selfReveal', 'true').lower() == 'true'
     
     ext = Path(file.filename).suffix.lower()
     is_video = ext in ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.gif']
@@ -188,7 +190,7 @@ def preview():
             
             # For preview, show first frame with stego info
             if hidden_msg and frames:
-                stego_frames = embed_multiframe(frames, hidden_msg)
+                stego_frames = embed_multiframe(frames, hidden_msg, self_reveal=self_reveal)
                 ascii_output = stego_frames[0]
                 info = get_frame_info(stego_frames[0])
                 stego_info = f"Multi-frame: chunk 1/{info[1]}" if info else "embedded"
@@ -203,7 +205,7 @@ def preview():
             
             # Show with stego if message provided
             if hidden_msg:
-                ascii_output = embed(ascii_output, hidden_msg)
+                ascii_output = embed(ascii_output, hidden_msg, self_reveal=self_reveal)
         
         return jsonify({
             'ascii': ascii_output,

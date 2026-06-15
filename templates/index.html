@@ -331,6 +331,10 @@
                         <input type="checkbox" id="detailed">
                         <label for="detailed" style="margin: 0">Detailed chars</label>
                     </div>
+                    <div class="option">
+                        <input type="checkbox" id="selfReveal" checked>
+                        <label for="selfReveal" style="margin: 0">Self-reveal (auto-decode trigger)</label>
+                    </div>
                 </div>
                 
                 <div class="buttons">
@@ -436,6 +440,7 @@
             const message = document.getElementById('message').value;
             const width = document.getElementById('width').value;
             const detailed = document.getElementById('detailed').checked;
+            const selfReveal = document.getElementById('selfReveal').checked;
             
             if (!file) {
                 showError('Please select a file first');
@@ -447,6 +452,7 @@
             formData.append('message', message);
             formData.append('width', width);
             formData.append('detailed', detailed);
+            formData.append('selfReveal', selfReveal);
             
             try {
                 const resp = await fetch('/preview', { method: 'POST', body: formData });
@@ -458,12 +464,15 @@
                 }
                 
                 document.getElementById('previewBox').textContent = data.ascii;
+                let stegoStatus = data.has_stego 
+                    ? `🔒 ${data.stego_type || 'Stego'} embedded` 
+                    : '⚠️ No stego';
+                if (data.stego_info) stegoStatus += ` (${data.stego_info})`;
+                
                 document.getElementById('stats').innerHTML = `
                     <span>📊 ${data.char_count.toLocaleString()} chars</span>
                     <span>🎬 ${data.frames} frame(s)</span>
-                    <span class="${data.has_stego ? 'stego-yes' : ''}">
-                        ${data.has_stego ? '🔒 Stego embedded' : '⚠️ No stego'}
-                    </span>
+                    <span class="${data.has_stego ? 'stego-yes' : ''}">${stegoStatus}</span>
                 `;
                 document.getElementById('previewCard').style.display = 'block';
                 document.getElementById('error').style.display = 'none';
@@ -478,6 +487,7 @@
             const message = document.getElementById('message').value;
             const width = document.getElementById('width').value;
             const detailed = document.getElementById('detailed').checked;
+            const selfReveal = document.getElementById('selfReveal').checked;
             
             if (!file) {
                 showError('Please select a file first');
@@ -493,6 +503,7 @@
             formData.append('message', message);
             formData.append('width', width);
             formData.append('detailed', detailed);
+            formData.append('selfReveal', selfReveal);
             
             try {
                 const resp = await fetch('/encode', { method: 'POST', body: formData });
@@ -541,7 +552,8 @@
                 resultDiv.style.display = 'block';
                 
                 if (data.has_stego) {
-                    statusDiv.innerHTML = '<span class="found">✅ Hidden message found!</span>';
+                    const typeLabel = data.type === 'multi' ? ' (multi-frame)' : ' (single-frame)';
+                    statusDiv.innerHTML = `<span class="found">✅ Hidden message found!${typeLabel}</span>`;
                     msgDiv.textContent = data.message;
                     msgDiv.style.display = 'block';
                 } else {
