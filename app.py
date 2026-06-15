@@ -10,15 +10,12 @@ import io
 import tempfile
 from pathlib import Path
 
-# Add parent dir for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from flask import Flask, request, render_template, send_file, jsonify
 from PIL import Image
 import cv2
 import numpy as np
 
-from llm_stego import embed, extract, has_stego
+from llm_stego import embed, extract, has_stego, embed_multiframe, extract_multiframe, has_multiframe_stego, get_frame_info
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
@@ -137,8 +134,8 @@ def encode():
             if not frames:
                 return jsonify({'error': 'Could not extract frames from video'}), 400
             
-            # Embed stego in first frame only (or spread across frames)
-            frames[0] = embed(frames[0], hidden_msg)
+            # Embed stego across ALL frames for long messages
+            frames = embed_multiframe(frames, hidden_msg)
             
             ascii_output = frames_to_document(frames)
             filename = 'stego_video.txt'
@@ -184,25 +181,37 @@ def preview():
         if is_video:
             with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                 file.save(tmp.name)
-                frames = video_to_ascii_frames(tmp.name, width=width, max_frames=5)
+                frames = video_to_ascii_frames(tmp.name, width=width, max_frames=10)
                 os.unlink(tmp.name)
             
-            ascii_output = frames[0] if frames else "Could not extract frames"
             frame_count = len(frames)
+            
+            # For preview, show first frame with stego info
+            if hidden_msg and frames:
+                stego_frames = embed_multiframe(frames, hidden_msg)
+                ascii_output = stego_frames[0]
+                info = get_frame_info(stego_frames[0])
+                stego_info = f"Multi-frame: chunk 1/{info[1]}" if info else "embedded"
+            else:
+                ascii_output = frames[0] if frames else "Could not extract frames"
+                stego_info = None
         else:
             img = Image.open(file.stream)
             ascii_output = image_to_ascii(img, width=width, detailed=detailed)
             frame_count = 1
-        
-        # Show with stego if message provided
-        if hidden_msg:
-            ascii_output = embed(ascii_output, hidden_msg)
+            stego_info = None
+            
+            # Show with stego if message provided
+            if hidden_msg:
+                ascii_output = embed(ascii_output, hidden_msg)
         
         return jsonify({
             'ascii': ascii_output,
             'frames': frame_count,
-            'has_stego': has_stego(ascii_output),
-            'char_count': len(ascii_output)
+            'has_stego': has_stego(ascii_output) or has_multiframe_stego(ascii_output),
+            'char_count': len(ascii_output),
+            'stego_type': 'multi-frame' if (is_video and hidden_msg) else 'single-frame' if hidden_msg else None,
+            'stego_info': stego_info
         })
         
     except Exception as e:
@@ -211,7 +220,7 @@ def preview():
 
 @app.route('/decode', methods=['POST'])
 def decode():
-    """Extract hidden message from ASCII text."""
+    """Extract hidden message from ASCII text (single or multi-frame)."""
     
     text = request.form.get('text', '')
     
@@ -221,12 +230,34 @@ def decode():
     if not text:
         return jsonify({'error': 'No text provided'}), 400
     
+    # Try single-frame first
     hidden = extract(text)
+    stego_type = 'single'
+    
+    # If not found, try multi-frame (split by frame separators)
+    if hidden is None and has_multiframe_stego(text):
+        # Split into frames by separator
+        import re
+        frame_pattern = r'=+ FRAME \d+ =+'
+        parts = re.split(frame_pattern, text)
+        frames = [p.strip() for p in parts if p.strip()]
+        
+        if frames:
+            hidden = extract_multiframe(frames)
+            stego_type = 'multi'
+            
+            # Get frame info
+            frame_info = []
+            for f in frames:
+                info = get_frame_info(f)
+                if info:
+                    frame_info.append(f"{info[0]}/{info[1]}")
     
     return jsonify({
         'has_stego': hidden is not None,
         'message': hidden,
-        'char_count': len(text)
+        'char_count': len(text),
+        'type': stego_type if hidden else None
     })
 
 
